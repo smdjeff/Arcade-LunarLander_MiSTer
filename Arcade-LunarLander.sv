@@ -190,6 +190,7 @@ localparam CONF_STR = {
 	"R0,Reset;",
 	"J1,Start,Select,Coin,Abort,Turn Right,Turn Left;",	
     "jn,Start,Select,X,A,L,R;",
+	"DEFMRA,/_Arcade/Lunar Lander.mra;", // causes the HPC side to reload the roms for us
 	"V,v",`BUILD_DATE
 };
 // 00010000
@@ -253,6 +254,7 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 	.joystick_l_analog_0(analog_joy_0)
 );
 
+`ifndef MISTER_VECTOR
 
 wire hblank, vblank;
 wire ohblank, ovblank;
@@ -323,6 +325,8 @@ ovo #(.COLS(1), .LINES(1), .RGB(24'hFF00FF)) diff (
 	.in0(difficulty),
 	.in1()
 );
+
+`endif
 
 wire lamp2, lamp3, lamp4, lamp5;
 
@@ -402,6 +406,36 @@ wire [7:0] in_thrust = status[13] ? dpad_thrust : us_joy_mod;
 
 wire is_starting;
 
+`ifdef MISTER_VECTOR
+
+  // game is outputting 10bit dac
+  // VGA_RGB internal ports are 8
+  // but hardware DAC is only the 6 lsb pins [5:0]
+
+// input
+// 10-bit unsigned inputs from the game core
+wire [9:0] x_dac10;
+wire [9:0] y_dac10;
+wire [3:0] z_dac4;
+
+// output
+// 6-bit r2r dac, but pwm'd to 10
+wire [5:0] z6 = (z_dac4 == 0) ? 6'h3f : 6'h00;  // binary, on/off for scope
+wire [5:0] x6, y6;
+sd10to6 sd_x(.clk(CLK_50M), .in(x_dac10), .out(x6));
+sd10to6 sd_y(.clk(CLK_50M), .in(y_dac10), .out(y6));
+
+// drive 6-bit ladder every clk
+always @(posedge CLK_50M) begin
+    VGA_B <= x6;  // X on Blue
+    VGA_R <= y6;  // Y on Red
+    VGA_G <= z6;  // intensity on Green
+end
+
+
+`endif
+
+
 LLANDER_TOP LLANDER_TOP
 (
 	.ROT_LEFT_L(in_turn_l),
@@ -424,10 +458,18 @@ LLANDER_TOP LLANDER_TOP
 	.AUDIO_OUT(audio),
 	.dn_addr(ioctl_addr[15:0]),
 	.dn_data(ioctl_dout),
-	.dn_wr(ioctl_wr),	
+	.dn_wr(ioctl_wr),
+
+// vector outs	
+	.VECTOR_X( x_dac10 ),
+	.VECTOR_Y( y_dac10 ),
+	.VECTOR_Z( z_dac4 ),
+
+// raster outs		
 	.VIDEO_R_OUT(r),
 	.VIDEO_G_OUT(g),
 	.VIDEO_B_OUT(b),
+	
 	.HSYNC_OUT(hs),
 	.VSYNC_OUT(vs),
 	.VGA_DE(vgade),
@@ -440,3 +482,35 @@ LLANDER_TOP LLANDER_TOP
 );
 
 endmodule
+
+// First-order sigma-delta (10-bit -> 6-bit)
+module sd10to6 (
+  input  wire       clk,
+  input  wire [9:0] in,   // 0..1023 (unsigned)
+  output reg  [5:0] out   // 0..63   (to 6-bit R-2R ladder)
+);
+  // Split input into coarse MSBs and 4-bit fraction
+  wire [5:0] coarse = in[9:4];
+  wire [3:0] frac   = in[3:0];
+
+  // Residual accumulator (0..15)
+  reg  [3:0] acc = 4'd0;
+
+  // Current-cycle sum & carry (combinational)
+  wire [4:0] s     = acc + frac;  // 0..31
+  wire       carry = s[4];        // >=16?
+  wire [3:0] res   = s[3:0];      // s - 16 if carry, else s
+
+  always @(posedge clk) begin
+    // Emit coarse or coarse+1 this tick (with saturation)
+    if (carry)
+      out <= (coarse == 6'd63) ? 6'd63 : (coarse + 6'd1);
+    else
+      out <= coarse;
+
+    // Update residual for next tick
+    acc <= res;
+  end
+endmodule
+
+

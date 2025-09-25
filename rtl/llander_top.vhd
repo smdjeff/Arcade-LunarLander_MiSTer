@@ -91,7 +91,11 @@ entity LLANDER_TOP is
 		dn_addr          	: in std_logic_vector(15 downto 0);
 		dn_data         	: in std_logic_vector(7 downto 0);
 		dn_wr					: in std_logic;
-    
+
+	 VECTOR_X          : out std_logic_vector(9 downto 0);
+	 VECTOR_Y          : out std_logic_vector(9 downto 0);
+	 VECTOR_Z          : out std_logic_vector(3 downto 0);	
+ 
     VIDEO_R_OUT       : out   std_logic_vector(3 downto 0);
     VIDEO_G_OUT       : out   std_logic_vector(3 downto 0);
     VIDEO_B_OUT       : out   std_logic_vector(3 downto 0);
@@ -214,6 +218,11 @@ port map(
 
 
 	y_vector_w_offset<= y_vector+100;
+	
+  VECTOR_X <= x_vector;
+  VECTOR_Y <= y_vector;
+  VECTOR_Z <= z_vector;
+  
 		
   u_DW : entity work.ASTEROIDS_DW
     port map (
